@@ -1,3 +1,5 @@
+#ifndef _WIFI_CONNECT_TOOL_H_
+#define _WIFI_CONNECT_TOOL_H_
 #include <ESP8266WiFi.h>
 #include <DNSServer.h>
 #include <ESP8266WebServer.h>
@@ -9,40 +11,70 @@
 int Signal_filtering = -200;
 String Hostname = "ESP8266";
 
-String WIFI_SSID;
-String WIFI_PWD;
+String smart_data = "";
+int size_data = 0; //WIFI数据长度
+String wifiname="";
+String wifipsw="";
+int wifiname_len; // wifi名的长度
 
-struct config_type
+void write_eeprom() //写入函数
 {
-	char sta_SSID[32]; //定义得到的SSID(最大32字节)
-	char sta_PWD[32];  //定义配网得到的密码(最大32字节)
-};
+  while (1)
+  {
+      wifiname_len = wifiname.length(); //获取wifi名的长度
+      if (wifiname_len < 9) {//判断wifi名是否为个位数，是则在前面补零
+        smart_data = String("0") + String(wifiname_len) + String(size_data) + String (wifiname.c_str()) + String(wifipsw.c_str());
+        size_data = String(smart_data).length();
+        smart_data = String("0") + String(wifiname_len) + String(size_data) + String (wifiname.c_str()) + String(wifipsw.c_str());
+      } else {
+        smart_data = String(wifiname_len) + String(size_data) + String (wifiname.c_str()) + String(wifipsw.c_str());
+        size_data = String(smart_data).length();
+        smart_data = String(wifiname_len) + String(size_data) + String (wifiname.c_str()) + String(wifipsw.c_str());
+      }
+      Serial.println(size_data);
+      Serial.println(smart_data); //打印出保存在eeprom数据
+      Serial.println(String(smart_data).length());//打印出保存在eeprom中的数据长度
+      for (int addr = 300; addr < size_data + 301; addr++)
+      {
+        //int data = addr%256; //在该代码中等同于int data = addr;因为下面write方法是以字节为存储单位的.
+        //String(smart_data).charAt(addr);
+        EEPROM.write(addr, toascii(String(smart_data).charAt(addr-300))); //写数据
+		delay(50);
+	  }
+      EEPROM.commit(); //保存更改的数据
 
-config_type config; //声明定义内容
-
-void saveConfig() //保存函数
-{
-	EEPROM.begin(1024); //向系统申请1024kb ROM
-	//开始写入
-	uint8_t *p = (uint8_t *)(&config);
-	for (int i = 0; i < sizeof(config); i++)
-	{
-		EEPROM.write(i, *(p + i)); //在闪存内模拟写入
-	}
-	EEPROM.commit(); //执行写入ROM
+      Serial.println("End write");
+      break;
+    }
+	EEPROM.end();
 }
 
-void loadConfig() //读取函数
+void read_eeprom() //读取函数
 {
-	EEPROM.begin(1024);
-	uint8_t *p = (uint8_t *)(&config);
-	for (int i = 0; i < sizeof(config); i++)
-	{
-		*(p + i) = EEPROM.read(i);
-	}
-	EEPROM.commit();
-	WIFI_SSID = config.sta_SSID;
-	WIFI_PWD = config.sta_PWD;
+  wifiname = "";
+  wifipsw = "";
+  int a = (int(EEPROM.read(300)) - int('0')) * 10 + (int(EEPROM.read(301)) - int('0')); //读数据，地址0和地址1分别保存wifi名称的长度的十位和个位
+  int b = (int(EEPROM.read(302)) - int('0')) * 10 + (int(EEPROM.read(303)) - int('0')) ; //读数据，地址2和地址3分别保存wifi密码的长度的十位和个位
+  Serial.println();
+  Serial.println(a);//打印出wifi名的长度，看是否正确
+  Serial.println(b);//打印出整个保存在eeprom中字符串的长度
+  for (int addr = 304; addr < b + 301; addr++)//地址304开始则是wifi的名称，然后依次是wifi密码
+  {
+    int data = EEPROM.read(addr); //读数据
+    if (addr < a + 304)
+    {
+      wifiname = wifiname + char(data);
+    }
+    else
+    {
+      wifipsw = wifipsw + char(data);
+    }
+    delay(2);
+  }
+  Serial.print("SSID:");
+  Serial.println(wifiname);
+  Serial.print("PASSWORD:");
+  Serial.println(wifipsw);
 }
 
 String wifi_flag = "0";				  //配网标志
@@ -85,7 +117,7 @@ String wifi_type(int typecode)
 		return "WPA*";
 }
 
-void wifiScan()
+void wifiScan() //扫描周围的wifi信息
 {
 	String req_json = "";
 	Serial.println("Scan WiFi");
@@ -97,7 +129,6 @@ void wifiScan()
 		for (int i = 0; i < n; i++)
 		{
 			if ((int)WiFi.RSSI(i) >= Signal_filtering)
-			//  if (1)
 			{
 				m++;
 				String a = "{\"ssid\":\"" + (String)WiFi.SSID(i) + "\"," + "\"encryptionType\":\"" + wifi_type(WiFi.encryptionType(i)) + "\"," + "\"rssi\":" + (int)WiFi.RSSI(i) + "},";
@@ -114,15 +145,6 @@ void wifiScan()
 		Serial.print(" WiFi!  >");
 		Serial.print(Signal_filtering);
 		Serial.println("dB");
-	}
-}
-
-void opera()
-{
-	if (webServer.arg("opera") == "sb")
-	{
-
-		webServer.send(200, "text/plain", Hostname);
 	}
 }
 
@@ -148,7 +170,6 @@ void wifiConfig()
 
 			Serial.print("Connenting");
 
-			//      WiFi.mode(WIFI_STA);
 			WiFi.begin(ssid, password);
 			delay(5000);
 			//连接wifi
@@ -172,11 +193,12 @@ void wifiConfig()
 				webServer.send(200, "text/plain", "1");
 				delay(300);
 				wifi_flag = "1";
-				strcpy(config.sta_SSID, ssid);	  //复制ssid
-				strcpy(config.sta_PWD, password); //复制pwd
-				Serial.println(config.sta_SSID);
-				Serial.println(config.sta_PWD);
-				saveConfig(); //调用保存函数
+				wifiname=ssid;
+				wifipsw=password;
+				Serial.println(wifiname);
+				Serial.println(wifipsw);
+				write_eeprom(); //调用保存函数
+				read_eeprom();
 				WiFi.softAPdisconnect();
 				delay(1000);
 				ESP.restart();
@@ -220,7 +242,6 @@ void initWebServer(void)
 	}
 	webServer.on("/wificonfig", wifiConfig);
 	webServer.on("/wifiscan", wifiScan);
-	webServer.on("/opera", opera);
 	if (wifi_flag == "0")
 		webServer.onNotFound([]()
 							{ webServer.send(200, "text/html", responseHTML); });
@@ -242,9 +263,11 @@ void connectNewWifi(void)
 	WiFi.hostname(Hostname);   //设置ESP8266设备名
 	WiFi.mode(WIFI_STA);	   //切换为STA模式
 	WiFi.setAutoConnect(true); //设置自动连接
-	loadConfig();			   //读取信息
+	read_eeprom();			   //读取wifi信息
 	delay(100);
-	WiFi.begin(WIFI_SSID, WIFI_PWD); //连接上一次连接成功的wifi
+	Serial.print(wifiname);
+	Serial.print(wifipsw);
+	WiFi.begin(wifiname, wifipsw); //连接上一次连接成功的wifi
 	Serial.println("");
 	Serial.print("start Connect to wifi");
 	int count = 0;
@@ -257,7 +280,7 @@ void connectNewWifi(void)
 		delay(1000);
 		digitalWrite(LED, LOW);
 		count++;
-		if (count > 4)
+		if (count > 15)
 		{ //如果8秒内没有连上，就开启Web配网 可适当调整这个时间
 			initSoftAP();
 			initWebServer();
@@ -279,7 +302,7 @@ void connectNewWifi(void)
 	}
 }
 
-void load()
+void wifi_load()
 {
 	Serial.begin(115200);
 	SPIFFS.begin();
@@ -294,7 +317,7 @@ void load()
 	connectNewWifi();
 }
 
-void pant()
+void wifi_pant()
 {
 	if (wifi_flag == "0")
 	{
@@ -306,9 +329,6 @@ void pant()
 		webServer.handleClient();
 		dnsServer.processNextRequest();
 	}
-	else if (wifi_flag == "1")
-	{
-		Serial.println("Wifi 已连接");
-		delay(3000);
-	}
 }
+
+#endif
